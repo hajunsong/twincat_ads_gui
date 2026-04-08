@@ -1,0 +1,29 @@
+# --- CMake (out-of-source build 권장) ---
+build/
+cmake-build-*/
+out/
+
+# --- Qt / IDE ---
+*.user
+*.user.*
+*~
+*.autosave
+
+# --- Python (plotting) ---
+plotting/venv/
+plotting/**/__pycache__/
+*.py[cod]
+.Python
+
+# --- 앱·스크립트 런타임 산출물 ---
+logging/
+plotting/output/
+
+# --- OS / 기타 ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# clangd 등이 소스 트리에 두는 경우 (선택)
+# compile_commands.json

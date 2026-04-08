@@ -1,0 +1,232 @@
+variables:
+  TEST_RUNNER_CONTAINER: ${REGISTRY_HOST}/beckhoff/test_stage/test_runner:v13.15
+  BHF_CI_TEST_STAGE_GIT_REF: v13.15
+
+image: ${REGISTRY_HOST}/beckhoff/bdpg:v13.3.0
+
+cache:
+  paths:
+  - apt-cache/
+
+codestyle:
+  stage: build
+  tags:
+    - arm64
+    - docker-v2
+  before_script:
+    - apt update -y && apt install -y clang-format
+    - clang-format --version
+  script:
+    - ./tools/run-uncrustify.sh check
+  rules:
+    - if: $BHF_CI_SKIP_CODESTYLE == "y"
+      when: never
+    - if: $CI_MERGE_REQUEST_ID
+      when: never
+    - when: on_success
+
+docker-image:
+  image: ${CI_REGISTRY}/beckhoff/okinak:master
+  stage: .pre
+  parallel:
+    matrix:
+      - BHF_CI_ARCH:
+        - amd64
+        - arm64
+  tags:
+    - ${BHF_CI_ARCH}
+    - docker-v2-privileged
+  script:
+    - okinak build-native
+
+docker-image-build:
+  extends: docker-image
+
+build-only:
+  stage: build
+  image: "${IMAGE}"
+  variables:
+    BHF_CI_ARCH: 'amd64'
+    IMAGE: "${CI_REGISTRY_IMAGE}/build:${CI_PIPELINE_ID}-${BHF_CI_ARCH}"
+  script: .ci/run-build-and-test.sh
+  artifacts:
+    when: always
+    paths:
+    - .test-stage/reports/*
+    - .test-pack/T_100_test_delete_reg_key/bin
+    - AdsLib/**/*.h
+    - build/
+    - example/build/
+  tags:
+    - ${BHF_CI_ARCH}
+    - docker-v2
+  parallel:
+    matrix:
+      - FLAVOR: 'alpine'
+        IMAGE: "${DOCKER_PROXY}alpine:3.23.3"
+      - FLAVOR: 'arch'
+        CXX:
+        - clang++
+        - g++
+        IMAGE: "${DOCKER_PROXY}archlinux:base-devel"
+      - FLAVOR: 'mxe'
+        IMAGE: "${REGISTRY_HOST}/beckhoff/docker-mxe:40549"
+
+build-and-test:
+  extends: build-only
+  variables:
+    CI_DEBUG_SERVICES: 'true'
+  services:
+    - name: "${CI_REGISTRY_IMAGE}:${CI_PIPELINE_ID}-${BHF_CI_ARCH}"
+      alias: ads-server
+      variables:
+        TCSYSTEMSERVICEUM_LOG: '/builds/service-container-${CI_JOB_ID}/ads-server.log'
+  after_script:
+    - mkdir -p .test-stage/reports/
+    - cp -a /builds/service-container-${CI_JOB_ID}/* .test-stage/reports/
+  parallel:
+    matrix:
+      - FLAVOR: 'cross-i686'
+      - FLAVOR: 'cross-mips'
+      - FLAVOR: 'cross-riscv64'
+      - FLAVOR: 'tclur'
+        BHF_CI_ARCH:
+        - amd64
+        - arm64
+        CXX:
+        - clang++
+        - g++
+
+build-cmake:
+  stage: build
+  tags:
+    - amd64
+    - docker-v2
+  before_script:
+    - apt-get update && apt-get --assume-yes install cmake
+  script:
+    - cmake -S . -B build
+    - cmake --build build
+  artifacts:
+    when: always
+    paths:
+    - AdsLib/**/*.h
+    - build/
+
+build-win10:
+  stage: build
+  tags:
+    - MD_VS_GUI_TCPKG_TC
+  script:
+    - $env:CI_COMMIT_MESSAGE = $null
+    - $env:CI_COMMIT_DESCRIPTION = $null
+    - $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+    - $prog_x86 = [System.Environment]::GetFolderPath('ProgramFilesX86'); $vswhere = "${prog_x86}\Microsoft Visual Studio\Installer\vswhere.exe"; $vsInstallPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath; Import-Module "$vsInstallPath\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"; Enter-VsDevShell -VsInstallPath:$vsInstallPath -SkipAutomaticLocation -DevCmdArguments:'-arch=x64 -host_arch=x64'
+    - meson setup build --native-file meson.native.win32
+    - ninja -C build
+    - meson setup example/build example --native-file meson.native.win32
+    - ninja -C example/build
+  artifacts:
+    when: always
+    paths:
+    - AdsLib/**/*.h
+    - build/
+    - example/build/
+
+build-and-test-in-vm:
+  extends: build-and-test
+  parallel:
+    matrix:
+      - FLAVOR: 'tcbsd'
+  tags:
+    - ${BHF_CI_ARCH}
+    - vm-runner
+  script:
+    - tools/prepare_test_stage.sh
+    - rackctl-emulate add test-device 200
+    - test_stage/test_stage.sh --config-dir=.test-stage rackctl --install="$(realpath ./*.iso)" test-device & wait $!
+
+test-pack:
+  stage: build
+  image: ${CI_REGISTRY}/beckhoff/test_stage/test-pack:v13.7
+  needs:
+    - job: build-and-test
+      parallel:
+        matrix:
+          - FLAVOR: 'tclur'
+            BHF_CI_ARCH:
+            - amd64
+            - arm64
+            CXX: g++
+  before_script:
+    - export AWS_ACCESS_KEY_ID=test-packs
+    - export AWS_SECRET_ACCESS_KEY="${S3_TEST_PACKS_PASS}"
+  script:
+    - test-pack push-pipelines --write-gitlab-dotenv=test-pack.env .test-pack
+  artifacts:
+    reports:
+      dotenv: test-pack.env
+
+test-registry:
+  stage: test
+  needs: [ 'test-pack' ]
+  parallel:
+    matrix:
+      - DOWNSTREAM: build-tcrtos
+        BHF_CI_SKIP_TEST_HARDWARE: 'n'
+      - DOWNSTREAM: tcbsd-ports
+        BHF_CI_SKIP_TEST_HARDWARE: 'y'
+      - DOWNSTREAM: test-tcos
+        BHF_CI_SKIP_TEST_HARDWARE: 'y'
+      - DOWNSTREAM: test-windows
+        BHF_CI_SKIP_TEST_HARDWARE: 'y'
+  trigger:
+    project: beckhoff/${DOWNSTREAM}
+    strategy: depend
+    forward:
+      pipeline_variables: true
+  when: manual
+
+build-debian:
+  parallel:
+    matrix:
+      - BHF_CI_ARCH:
+        - amd64
+        - arm64
+  stage: build
+  tags:
+    - ${BHF_CI_ARCH}
+    - docker-v2
+  script:
+    - bdpg install-build-deps
+    - bdpg build
+    - bdpg push-pipelines
+  artifacts:
+    expire_in: 1 week
+    when: always
+    paths:
+      - ./debian-release
+
+release-push:
+  stage: deploy
+  dependencies:
+    - build-debian
+  script: bdpg push
+  rules:
+    - if: $CI_DEFAULT_BRANCH != $CI_COMMIT_BRANCH
+      when: never
+    - if: $CI_PIPELINE_SOURCE != "push"
+      when: never
+    - when: on_success
+  allow_failure: true
+
+release-test-pack:
+  stage: deploy
+  needs: [ "test-pack" ]
+  before_script:
+    - export AWS_ACCESS_KEY_ID=test-packs
+    - export AWS_SECRET_ACCESS_KEY="${S3_TEST_PACKS_PASS}"
+  script: test-pack release
+  rules:
+    - if: ($CI_DEFAULT_BRANCH == $CI_COMMIT_BRANCH) && (($CI_PIPELINE_SOURCE == "push") || ($CI_PIPELINE_SOURCE == "schedule"))
+      when: manual
