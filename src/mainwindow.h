@@ -10,9 +10,30 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "twincat_logging_buffer.h"
 #include "twincat_path_cmd.h"
+#include "body_scope.h"
+
+#include <vector>
+
+struct AdsAccessSpec {
+  std::uint32_t indexGroup;
+  std::uint32_t indexOffset;
+  std::uint32_t byteLength;
+};
+
+struct AdsBodyScopeProfile {
+  std::uint16_t defaultPort;
+  AdsAccessSpec dataMotorSt;
+  AdsAccessSpec dataMotorCmd;
+  AdsAccessSpec mainCmd;
+  AdsAccessSpec subCmd;
+  AdsAccessSpec pathCmd;
+  AdsAccessSpec loggingBuffer;
+  bool contiguousStCmdRead;
+};
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -42,6 +63,7 @@ class MainWindow : public QMainWindow {
   void onGraphViewClicked();
   void onTopologyModuleClicked(int topologyModuleId);
   void onGraphDisplaySelectionChanged();
+  void onBodyScopeChanged(int index);
   void pollDataMotorSt();
   void appendLoggingSnapshot();
 
@@ -80,6 +102,31 @@ class MainWindow : public QMainWindow {
   void resetGraphDisplayData();
   void updateGraphDisplayFromPoll();
   void setupEmbeddedTopology();
+  void setupBodyScopeUi();
+  void applyBodyScope();
+  void applyEndpointForBodyScope(BodyScope scope);
+  void saveConnectionSettings();
+  void rebuildPathIndexCombo();
+  bool moduleInCurrentScope(int moduleId) const;
+  BodyScopeRange currentBodyScopeRange() const;
+  const AdsBodyScopeProfile &currentAdsProfile() const;
+  bool readDataMotorStRaw(std::vector<std::uint8_t> *out) const;
+  bool readDataMotorCmdRaw(std::vector<std::uint8_t> *out) const;
+  void clearMotorStPollDataForRow(int row);
+  void clearMotorStPollDataOutsideScope();
+  void resetMotorTableScroll();
+  void updateMotorTableDisplayIndices();
+  void printLowerBodyScopeDiagnostics() const;
+  void printLowerBodyPollDiagnostics(const std::uint8_t *stRaw, std::size_t stByteLen,
+                                     const std::uint8_t *cmdRaw, std::size_t cmdByteLen,
+                                     std::size_t cmdStride) const;
+  void startPathMotionTracking();
+  void stopPathMotionTracking();
+  void updatePathProgressDisplay();
+  bool readPathParametersFromPlc(std::vector<PathParameter> *params) const;
+  static int pathProgressPercent(std::int32_t start, std::int32_t target, std::int32_t actual);
+  std::int32_t motorTablePosition(int row) const;
+  std::int32_t motorTableSetPosition(int row) const;
 
   Ui::MainWindow *ui_;
   std::unique_ptr<AdsDevice> device_;
@@ -110,4 +157,11 @@ class MainWindow : public QMainWindow {
   static constexpr int kGraphDisplayMaxPoints = 500;
 
   TopologyWidget *topologyWidget_ = nullptr;
+  BodyScope bodyScope_ = BodyScope::WholeBody;
+  mutable bool lowerBodyScopeDiagPrinted_ = false;
+  mutable bool lowerBodyPollDiagPrinted_ = false;
+  bool pathMotionActive_ = false;
+  std::array<bool, kTwinCatPathCmdCount> pathTracking_{};
+  std::array<std::int32_t, kTwinCatPathCmdCount> pathStartPos_{};
+  std::array<std::int32_t, kTwinCatPathCmdCount> pathTargetPos_{};
 };

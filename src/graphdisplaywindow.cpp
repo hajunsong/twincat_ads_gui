@@ -99,6 +99,34 @@ GraphDisplayWindow::GraphDisplayWindow(QWidget *parent)
 
 GraphDisplayWindow::~GraphDisplayWindow() = default;
 
+void GraphDisplayWindow::setVisibleModuleRange(int firstModule, int lastModule) {
+  visibleFirstModule_ = qBound(0, firstModule, static_cast<int>(kTwinCatLogMotorCount) - 1);
+  visibleLastModule_ =
+      qBound(0, lastModule, static_cast<int>(kTwinCatLogMotorCount) - 1);
+  if (visibleFirstModule_ > visibleLastModule_) {
+    qSwap(visibleFirstModule_, visibleLastModule_);
+  }
+
+  if (comboModule_) {
+    comboModule_->blockSignals(true);
+    comboModule_->clear();
+    for (int m = visibleFirstModule_; m <= visibleLastModule_; ++m) {
+      comboModule_->addItem(tr("M%1").arg(m), m);
+    }
+    comboModule_->blockSignals(false);
+  }
+
+  const int nMot = static_cast<int>(kTwinCatLogMotorCount);
+  if (plotAllPosition_) {
+    for (int i = 0; i < nMot; ++i) {
+      const bool visible = (i >= visibleFirstModule_ && i <= visibleLastModule_);
+      plotAllPosition_->graph(i)->setVisible(visible);
+    }
+    plotAllPosition_->replot();
+  }
+  emit selectionChanged();
+}
+
 void GraphDisplayWindow::updateDisplay(const QVector<double> &time,
                                        const QVector<QVector<double>> &posByModule,
                                        const QVector<double> &selX,
@@ -113,7 +141,11 @@ void GraphDisplayWindow::updateDisplay(const QVector<double> &time,
 
   const int n = qMin(static_cast<int>(kTwinCatLogMotorCount), posByModule.size());
   for (int j = 0; j < n; ++j) {
-    plotAllPosition_->graph(j)->setData(time, posByModule[j]);
+    if (j >= visibleFirstModule_ && j <= visibleLastModule_) {
+      plotAllPosition_->graph(j)->setData(time, posByModule[j]);
+    } else {
+      plotAllPosition_->graph(j)->data()->clear();
+    }
   }
   plotAllPosition_->rescaleAxes(true);
   plotAllPosition_->xAxis->setRange(xMin, xMax);

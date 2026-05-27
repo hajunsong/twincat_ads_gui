@@ -52,15 +52,18 @@ constexpr std::array<QPointF, 31> kBodyLayout = {
     QPointF(0.40, 0.22), QPointF(0.60, 0.22), QPointF(0.66, 0.22), QPointF(0.72, 0.22),
     QPointF(0.28, 0.32), QPointF(0.28, 0.42), QPointF(0.28, 0.52), QPointF(0.28, 0.62),
     QPointF(0.72, 0.32), QPointF(0.72, 0.42), QPointF(0.72, 0.52), QPointF(0.72, 0.62),
-    QPointF(0.50, 0.35), QPointF(0.47, 0.43), QPointF(0.53, 0.43), QPointF(0.42, 0.50),
+    QPointF(0.47, 0.39), QPointF(0.53, 0.39), QPointF(0.50, 0.47), QPointF(0.42, 0.50),
     QPointF(0.42, 0.60), QPointF(0.42, 0.70), QPointF(0.42, 0.80), QPointF(0.42, 0.90),
     QPointF(0.42, 1.00), QPointF(0.58, 0.50), QPointF(0.58, 0.60), QPointF(0.58, 0.70),
     QPointF(0.58, 0.80), QPointF(0.58, 0.90), QPointF(0.58, 1.00)};
 
-/** 화면 위치별 모듈 인덱스 0…30 (이전 M1…M31에서 −1). */
+/** 화면 위치별 모듈 인덱스 0…30 (M0…M30). */
 constexpr std::array<int, 31> kModuleNumberByPosition = {
-    1,  0,  7,  6,  5,  12, 13, 14, 8,  9,  10, 11, 15, 16, 17, 18, 2,  3,  4,
+    1,  0,  4,  3,  2,  9,  10, 11, 5,  6,  7,  8,  12, 13, 14, 15, 16, 17, 18,
     19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30};
+
+constexpr int kModuleNodeDiameter = 36;
+constexpr int kModuleNodeRadius = kModuleNodeDiameter / 2;
 
 QVector<QPoint> buildModuleCenters(const QRect &panel, int nodeRadius) {
   QVector<QPoint> modules;
@@ -133,6 +136,19 @@ void TopologyWidget::setModuleStatus(int moduleId, StatusIcon icon) {
   update();
 }
 
+void TopologyWidget::setActiveModuleRange(int firstModule, int lastModule) {
+  m_activeFirstModule = qBound(0, firstModule, 30);
+  m_activeLastModule = qBound(0, lastModule, 30);
+  if (m_activeFirstModule > m_activeLastModule) {
+    qSwap(m_activeFirstModule, m_activeLastModule);
+  }
+  update();
+}
+
+bool TopologyWidget::isModuleActive(int moduleId) const {
+  return moduleId >= m_activeFirstModule && moduleId <= m_activeLastModule;
+}
+
 void TopologyWidget::paintEvent(QPaintEvent *event) {
   Q_UNUSED(event);
 
@@ -145,14 +161,30 @@ void TopologyWidget::paintEvent(QPaintEvent *event) {
   p.setBrush(Qt::NoBrush);
   p.drawRoundedRect(panel, 10, 10);
 
-  constexpr int kNodeDiameter = 36;
-  constexpr int kNodeRadius = kNodeDiameter / 2;
-
   const QPoint core(panel.center().x(), panel.center().y());
-  const QVector<QPoint> modules = buildModuleCenters(panel, kNodeRadius);
+  const QVector<QPoint> modules = buildModuleCenters(panel, kModuleNodeRadius);
 
-  p.setPen(QPen(QColor(70, 90, 120), 2));
-  const std::array<std::pair<int, int>, 31> links = {{
+  constexpr qreal kInactiveOpacity = 0.35;
+  const QPen linkPenActive(QColor(70, 90, 120), 2);
+
+  const auto moduleAtPositionActive = [this](int positionIndex) {
+    if (positionIndex < 0 || positionIndex >= static_cast<int>(kModuleNumberByPosition.size())) {
+      return false;
+    }
+    return isModuleActive(kModuleNumberByPosition[static_cast<size_t>(positionIndex)]);
+  };
+
+  const auto drawLink = [&](const QPoint &from, const QPoint &to, bool active) {
+    p.save();
+    if (!active) {
+      p.setOpacity(kInactiveOpacity);
+    }
+    p.setPen(linkPenActive);
+    p.drawLine(from, to);
+    p.restore();
+  };
+
+  const std::array<std::pair<int, int>, 30> links = {{
       {0, 1},
       {2, 3},
       {3, 4},
@@ -173,7 +205,6 @@ void TopologyWidget::paintEvent(QPaintEvent *event) {
       {21, 22},
       {22, 23},
       {23, 24},
-      {24, 25},
       {25, 26},
       {26, 27},
       {27, 28},
@@ -181,7 +212,9 @@ void TopologyWidget::paintEvent(QPaintEvent *event) {
       {29, 30},
   }};
   for (const auto &edge : links) {
-    p.drawLine(modules[edge.first], modules[edge.second]);
+    const bool linkActive =
+        moduleAtPositionActive(edge.first) && moduleAtPositionActive(edge.second);
+    drawLink(modules[edge.first], modules[edge.second], linkActive);
   }
 
   int topologyCenterX = core.x();
@@ -217,22 +250,35 @@ void TopologyWidget::paintEvent(QPaintEvent *event) {
   p.setPen(QColor(40, 55, 80));
   p.drawText(controllerRect, Qt::AlignCenter, controllerLabel);
 
-  p.setPen(QPen(QColor(70, 90, 120), 2));
-  p.drawLine(QPoint(controllerRect.center().x(), controllerRect.top()), modules[1]);
-  p.drawLine(QPoint(controllerRect.center().x(), controllerRect.bottom()), modules[16]);
-  p.drawLine(QPoint(controllerRect.left(), controllerRect.center().y()), modules[4]);
-  p.drawLine(QPoint(controllerRect.right(), controllerRect.center().y()), modules[5]);
-  p.drawLine(QPoint(controllerRect.left(), controllerRect.bottom()), modules[19]);
+  drawLink(QPoint(controllerRect.center().x(), controllerRect.top()), modules[1],
+           moduleAtPositionActive(1));
+  drawLink(QPoint(controllerRect.center().x(), controllerRect.bottom()), modules[16],
+           moduleAtPositionActive(16));
+  drawLink(QPoint(controllerRect.left(), controllerRect.center().y()), modules[4],
+           moduleAtPositionActive(4));
+  drawLink(QPoint(controllerRect.right(), controllerRect.center().y()), modules[5],
+           moduleAtPositionActive(5));
+  drawLink(QPoint(controllerRect.left(), controllerRect.bottom()), modules[19],
+           moduleAtPositionActive(19));
+  drawLink(QPoint(controllerRect.right(), controllerRect.bottom()), modules[25],
+           moduleAtPositionActive(25));
 
   ensureStatusPixmaps();
   for (int i = 0; i < modules.size(); ++i) {
-    const QPoint &pt = modules[i];
     const int modNum = kModuleNumberByPosition[static_cast<size_t>(i)];
+    const bool active = isModuleActive(modNum);
+    const QPoint &pt = modules[i];
     const StatusIcon st = m_moduleStatus[static_cast<size_t>(modNum)];
     const QPixmap &statusPixmap = pixmapFor(st);
 
-    const QRect circleRect(pt.x() - kNodeRadius, pt.y() - kNodeRadius, kNodeDiameter,
-                           kNodeDiameter);
+    const QRect circleRect(pt.x() - kModuleNodeRadius, pt.y() - kModuleNodeRadius,
+                           kModuleNodeDiameter, kModuleNodeDiameter);
+
+    p.save();
+    if (!active) {
+      p.setOpacity(kInactiveOpacity);
+    }
+
     if (!statusPixmap.isNull()) {
       QPainterPath clipPath;
       clipPath.addEllipse(circleRect);
@@ -254,22 +300,25 @@ void TopologyWidget::paintEvent(QPaintEvent *event) {
     QFont f = p.font();
     f.setPointSize(8);
     p.setFont(f);
-    p.setPen(QColor(255, 255, 255));
+    p.setPen(active ? QColor(255, 255, 255) : QColor(200, 200, 200));
     p.drawText(circleRect, Qt::AlignCenter, QStringLiteral("M%1").arg(modNum));
+    p.restore();
   }
 }
 
 void TopologyWidget::mousePressEvent(QMouseEvent *event) {
-  constexpr int kNodeDiameter = 60;
-  constexpr int kNodeRadius = kNodeDiameter / 2;
-
   const QRect panel = rect().adjusted(14, 14, -14, -14);
-  const QVector<QPoint> modules = buildModuleCenters(panel, kNodeRadius);
+  const QVector<QPoint> modules = buildModuleCenters(panel, kModuleNodeRadius);
   const QPoint clickPos = event->pos();
 
   for (int i = 0; i < modules.size(); ++i) {
+    const int modNum = kModuleNumberByPosition[static_cast<size_t>(i)];
+    if (!isModuleActive(modNum)) {
+      continue;
+    }
     const QPoint delta = clickPos - modules[i];
-    if ((delta.x() * delta.x()) + (delta.y() * delta.y()) <= (kNodeRadius * kNodeRadius)) {
+    if ((delta.x() * delta.x()) + (delta.y() * delta.y()) <=
+        (kModuleNodeRadius * kModuleNodeRadius)) {
       emit moduleClicked(kModuleNumberByPosition[static_cast<size_t>(i)]);
       event->accept();
       return;

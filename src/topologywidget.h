@@ -21,6 +21,8 @@ class TopologyWidget : public QWidget {
    * Fault = nErrorCode != 0, Normal = nWcState==0, Disconnected = nWcState!=0 (오류 없음).
    */
   void setModuleStatus(int moduleId, StatusIcon icon);
+  /** Active module IDs inclusive (M0…M30). Inactive modules stay drawn but dimmed. */
+  void setActiveModuleRange(int firstModule, int lastModule);
 
  signals:
   /** 클릭한 모듈 인덱스 0…30 (M0…M30). */
@@ -33,7 +35,10 @@ class TopologyWidget : public QWidget {
  private:
   void ensureStatusPixmaps();
   const QPixmap &pixmapFor(StatusIcon icon) const;
+  bool isModuleActive(int moduleId) const;
 
+  int m_activeFirstModule = 0;
+  int m_activeLastModule = 30;
   std::array<StatusIcon, 31> m_moduleStatus{};
   mutable QPixmap m_pixDisconnected;
   mutable QPixmap m_pixNormal;

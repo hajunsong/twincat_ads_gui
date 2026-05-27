@@ -26,6 +26,8 @@ class GraphDisplayWindow : public QWidget {
   QComboBox *comboModule() const { return comboModule_; }
   QComboBox *comboData() const { return comboData_; }
 
+  void setVisibleModuleRange(int firstModule, int lastModule);
+
  signals:
   void selectionChanged();
 
@@ -34,4 +36,6 @@ class GraphDisplayWindow : public QWidget {
   QCustomPlot *plotSelected_ = nullptr;
   QComboBox *comboModule_ = nullptr;
   QComboBox *comboData_ = nullptr;
+  int visibleFirstModule_ = 0;
+  int visibleLastModule_ = 30;
 };
