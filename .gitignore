@@ -1,5 +1,6 @@
 # --- CMake (out-of-source build 권장) ---
 build/
+build-debug/
 cmake-build-*/
 out/
 

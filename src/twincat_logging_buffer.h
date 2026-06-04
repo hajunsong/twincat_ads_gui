@@ -88,9 +88,11 @@ static_assert(offsetof(MotorCmdWire, nMaxTorque) == 12, "");
 static_assert(offsetof(MotorCmdWire, nModeOfOperation) == 14, "");
 
 /**
- * Lower Body (TcLowerBodyController/Controller.tmc) ADS map.
- * DataArea AreaNo 3=ServerToClient, 4=ClientToServer, 5=LoggingBuffer
- * → index offset high byte 0x83 / 0x84 / 0x85 (0x80 + area).
+ * Lower Body C++ module (Controller.tmc, 15 motors) ADS map — index group F0200.
+ * Area 3 ServerToClient: DataMotorSt[15] @ 0x83000000 (240 B),
+ *   DataMotorCmd[15] @ 0x830000F0 (225 B, contiguous after MotorSt).
+ * Area 4 ClientToServer: MainCmd/SubCmd @ 0x84000000/02, PathCmd[15] @ 0x84000004 (465 B).
+ * Area 5 LogBuf: Flag + MotorStBuf[200][15] + MotorCmdBuf[200][15] @ 0x85000000 (93001 B).
  */
 inline constexpr std::uint32_t kLowerBodyDataMotorStIndexOffset = 0x83000000;
 inline constexpr std::uint32_t kLowerBodyDataMotorCmdIndexOffset = 0x830000F0;

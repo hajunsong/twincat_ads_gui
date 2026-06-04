@@ -156,6 +156,7 @@ constexpr uint16_t kCmdSubReset = 3;
 constexpr uint16_t kCmdMainMode = 2;
 constexpr uint16_t kCmdSubCsp = 1;
 constexpr uint16_t kCmdSubCsv = 2;
+constexpr uint16_t kCmdSubCst = 3;
 constexpr uint16_t kCmdMainPath = 3;
 constexpr uint16_t kCmdSubPathTrapezoidal = 1;
 constexpr uint16_t kCmdSubPathSCurve = 2;
@@ -546,14 +547,8 @@ void MainWindow::updateMotorTableDisplayIndices() {
 			continue;
 		}
 		idxItem->setData(r, kMotorTableRoleRealModule);
-		if (bodyScope_ == BodyScope::LowerBody && moduleInCurrentScope(r)) {
-			const int displayIdx = displayIndexForRealModule(r, bodyScope_);
-			idxItem->setText(QString::number(displayIdx));
-			idxItem->setToolTip(QStringLiteral("M%1").arg(r));
-		} else {
-			idxItem->setText(QString::number(r));
-			idxItem->setToolTip(QString());
-		}
+		idxItem->setText(QString::number(r));
+		idxItem->setToolTip(QString());
 	}
 }
 
@@ -680,6 +675,9 @@ void MainWindow::setupModeOfOperationUi() {
 	});
 	connect(ui_->btnCSV, &QPushButton::clicked, this, [this]() {
 		writeClientMainSubCmd(kCmdMainMode, kCmdSubCsv);
+	});
+	connect(ui_->btnCST, &QPushButton::clicked, this, [this]() {
+		writeClientMainSubCmd(kCmdMainMode, kCmdSubCst);
 	});
 }
 
@@ -1575,6 +1573,7 @@ void MainWindow::setConnectedUi(bool connected) {
 	ui_->btnReset->setEnabled(connected);
 	ui_->btnCSP->setEnabled(connected);
 	ui_->btnCSV->setEnabled(connected);
+	ui_->btnCST->setEnabled(connected);
 	ui_->btnGenerate->setEnabled(connected);
 	ui_->btnStop->setEnabled(connected);
 	ui_->btnRepeat->setEnabled(connected);
@@ -1891,14 +1890,7 @@ void MainWindow::onTopologyModuleClicked(int topologyModuleId) {
 	const QString pos = posItem ? posItem->text() : QStringLiteral("—");
 	const QString err = errItem ? errItem->text() : QStringLiteral("—");
 	statusBar()->showMessage(
-			QStringLiteral("M%1 · SW=%2 · Pos=%3 · Err=%4")
-					.arg(row)
-					.arg(sw)
-					.arg(pos)
-					.arg(err) +
-					(bodyScope_ == BodyScope::LowerBody
-							 ? QStringLiteral(" · index %1").arg(displayIndexForRealModule(row, bodyScope_))
-							 : QString()),
+			QStringLiteral("M%1 · SW=%2 · Pos=%3 · Err=%4").arg(row).arg(sw).arg(pos).arg(err),
 			6000);
 }
 
