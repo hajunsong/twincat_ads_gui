@@ -1,0 +1,37 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{cpp,h,hpp,c,cc}]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+
+[{CMakeLists.txt,*.cmake}]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+
+[*.ui]
+indent_style = space
+indent_size = 4
+
+[*.md]
+indent_style = space
+indent_size = 4
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+[third_party/**]
+indent_style = unset
+indent_size = unset
+
+[src/qcustomplot-source/**]
+indent_style = unset
+indent_size = unset

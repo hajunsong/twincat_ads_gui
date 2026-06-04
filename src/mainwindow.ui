@@ -710,7 +710,7 @@
        <item>
         <widget class="QCheckBox" name="cbMotorStWcConnectedOnly">
          <property name="text">
-          <string>WC Connect 모듈만 표시</string>
+          <string>Show WC-connected modules only</string>
          </property>
         </widget>
        </item>
