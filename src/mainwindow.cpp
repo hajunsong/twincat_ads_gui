@@ -45,6 +45,7 @@
 #include <cstring>
 #include <cmath>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -164,6 +165,10 @@ constexpr uint16_t kCmdSubPathOpRun = 3;
 constexpr uint16_t kCmdSubPathOpRepeat = 4;
 constexpr uint16_t kCmdSubPathOpCyclic = 5;
 constexpr uint16_t kCmdSubPathOpStop = 6;
+constexpr uint16_t kCmdMainJog = 4;
+constexpr uint16_t kCmdSubJogPlus = 1;
+constexpr uint16_t kCmdSubJogMinus = 2;
+constexpr uint16_t kCmdSubJogStop = 3;
 
 constexpr const char *kMotorStColSettingKeys[] = {"mode", "wc",    "err",   "trq",    "tgtPos",
 																									"setPos", "setVel", "setTrq"};
@@ -179,6 +184,8 @@ static_assert(kMotorCount == kTwinCatLogMotorCount,
 /** ClientToServer: MainCmd @ 0x84000000, SubCmd @ 0x84000002 — one write, 4 bytes. */
 constexpr uint32_t kClientMainSubIndexGroup = 0x1010010;
 constexpr uint32_t kClientMainSubIndexOffset = 0x84000000;
+constexpr uint32_t kClientJogPayloadIndexGroup = 0x1010010;
+constexpr uint32_t kClientJogPayloadIndexOffset = 0x840001D5;
 
 std::size_t motorCmdWireStrideForProfile(const AdsBodyScopeProfile &profile) {
 	if (profile.contiguousStCmdRead) {
@@ -195,6 +202,15 @@ struct ClientMainSubCmd {
 #pragma pack(pop)
 
 static_assert(sizeof(ClientMainSubCmd) == 4, "MainCmd+SubCmd UINT pair");
+
+#pragma pack(push, 1)
+struct ClientJogPayload {
+	uint16_t id;
+	uint16_t tick;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(ClientJogPayload) == 4, "Jog ID+Tick UINT pair");
 
 /** CiA 402–style statusword (0x6041): state from bits 0–3,5–6 + common flags. */
 QString formatMotorStatusWord(uint16_t sw) {
@@ -349,6 +365,7 @@ MainWindow::MainWindow(QWidget *parent)
 	setupPathGenerationUi();
 	setupSystemControlUi();
 	setupModeOfOperationUi();
+	setupJogModeUi();
 	setupOperatingUi();
 	setupSetPosShortcuts();
 	setupLoggingUi();
@@ -681,6 +698,19 @@ void MainWindow::setupModeOfOperationUi() {
 	});
 }
 
+void MainWindow::setupJogModeUi() {
+	ui_->jogTick->setText(QStringLiteral("5"));
+	connect(ui_->btnJogPlus, &QPushButton::clicked, this, [this]() {
+		sendJogCommand(kCmdSubJogPlus);
+	});
+	connect(ui_->btnJogMinus, &QPushButton::clicked, this, [this]() {
+		sendJogCommand(kCmdSubJogMinus);
+	});
+	connect(ui_->btnJogStop, &QPushButton::clicked, this, [this]() {
+		sendJogCommand(kCmdSubJogStop);
+	});
+}
+
 void MainWindow::setupSetPosShortcuts() {
 	auto *f3 = new QShortcut(QKeySequence(Qt::Key_F3), this);
 	f3->setContext(Qt::WindowShortcut);
@@ -705,6 +735,68 @@ void MainWindow::setupSetPosShortcuts() {
 				it->setText(QStringLiteral("0"));
 			}
 		}
+	});
+	auto *f5 = new QShortcut(QKeySequence(Qt::Key_F5), this);
+	f5->setContext(Qt::WindowShortcut);
+	connect(f5, &QShortcut::activated, this, [this]() {
+		const BodyScopeRange range = currentBodyScopeRange();
+		QStringList lines;
+		lines.reserve(range.moduleCount);
+		for (int module = range.firstModule; module <= range.lastModule; ++module) {
+			lines << QStringLiteral("M%1=%2")
+									 .arg(module)
+									 .arg(motorTablePosition(module));
+		}
+		qDebug().noquote() << QStringLiteral("Current positions [%1]: %2")
+																.arg((bodyScope_ == BodyScope::WholeBody)
+																				 ? QStringLiteral("WholeBody")
+																				 : (bodyScope_ == BodyScope::UpperBody)
+																							 ? QStringLiteral("UpperBody")
+																							 : QStringLiteral("LowerBody"))
+																.arg(lines.join(QStringLiteral(", ")));
+		statusBar()->showMessage(
+				QStringLiteral("Current positions printed to debug log (%1 motors).")
+						.arg(range.moduleCount),
+				3000);
+	});
+
+	const auto applySetPosPreset =
+			[this](const std::vector<std::pair<int, std::int32_t>> &values,
+						 const QString &label) {
+				int applied = 0;
+				for (const auto &entry : values) {
+					const int row = entry.first;
+					if (row < 0 || row >= kMotorSetpointRow) {
+						continue;
+					}
+					if (QStandardItem *cell = motorStModel_.item(row, kColSetPos)) {
+						cell->setText(QString::number(entry.second));
+						++applied;
+					}
+				}
+				statusBar()->showMessage(
+						QStringLiteral("%1 preset applied to %2 motors.").arg(label).arg(applied),
+						3000);
+			};
+
+	auto *f6 = new QShortcut(QKeySequence(Qt::Key_F6), this);
+	f6->setContext(Qt::WindowShortcut);
+	connect(f6, &QShortcut::activated, this, [applySetPosPreset]() {
+		const std::vector<std::pair<int, std::int32_t>> rightLegUp = {
+				{16, 55077}, {17, -38906}, {18, -34736}, {19, -11789}, {20, -11039},
+				{21, -37820}, {22, -50521}, {23, -48195}, {24, -32584}, {25, -31077},
+				{26, 20407}, {27, -8314}, {28, 8514}, {29, 4951}, {30, -15797}};
+		applySetPosPreset(rightLegUp, QStringLiteral("Right leg up"));
+	});
+
+	auto *f7 = new QShortcut(QKeySequence(Qt::Key_F7), this);
+	f7->setContext(Qt::WindowShortcut);
+	connect(f7, &QShortcut::activated, this, [applySetPosPreset]() {
+		const std::vector<std::pair<int, std::int32_t>> leftLegUp = {
+				{16, 55647}, {17, -38713}, {18, -45080}, {19, 6917}, {20, -9456},
+				{21, -41121}, {22, -45913}, {23, -45136}, {24, -37402}, {25, -7247},
+				{26, 22334}, {27, -18038}, {28, 12816}, {29, 1809}, {30, -12233}};
+		applySetPosPreset(leftLegUp, QStringLiteral("Left leg up"));
 	});
 }
 
@@ -1255,6 +1347,50 @@ void MainWindow::writeClientMainSubCmd(uint16_t mainCmd, uint16_t subCmd) {
 	}
 }
 
+void MainWindow::sendJogCommand(std::uint16_t subCmd) {
+	if (!device_) {
+		return;
+	}
+	bool ok = false;
+	const std::uint16_t id =
+			static_cast<std::uint16_t>(ui_->JogID->currentText().trimmed().toUShort(&ok));
+	if (!ok) {
+		statusBar()->showMessage(QStringLiteral("Invalid jog ID."), 3000);
+		return;
+	}
+	const std::uint16_t tick =
+			static_cast<std::uint16_t>(ui_->jogTick->text().trimmed().toUShort(&ok));
+	if (!ok) {
+		statusBar()->showMessage(QStringLiteral("Invalid jog tick value."), 3000);
+		return;
+	}
+
+	ClientJogPayload payload{};
+	payload.id = id;
+	payload.tick = tick;
+
+	writeClientMainSubCmd(kCmdMainJog, subCmd);
+	const long err = device_->WriteReqEx(kClientJogPayloadIndexGroup, kClientJogPayloadIndexOffset,
+																			 sizeof(payload), &payload);
+	if (err != 0) {
+		statusBar()->showMessage(
+				QStringLiteral("Jog payload write failed: ADS %1 (Main=%2 Sub=%3, ID=%4 Tick=%5)")
+						.arg(err)
+						.arg(kCmdMainJog)
+						.arg(subCmd)
+						.arg(id)
+						.arg(tick),
+				6000);
+		return;
+	}
+	statusBar()->showMessage(QStringLiteral("Jog sent — Main=%1 Sub=%2, ID=%3, Tick=%4")
+													 .arg(kCmdMainJog)
+													 .arg(subCmd)
+													 .arg(id)
+													 .arg(tick),
+													 3000);
+}
+
 std::uint16_t MainWindow::pathProfileSubCmdFromComboIndex(int comboIndex) {
 	if (comboIndex == 1) {
 		return kCmdSubPathSCurve;
@@ -1579,6 +1715,9 @@ void MainWindow::setConnectedUi(bool connected) {
 	ui_->btnRepeat->setEnabled(connected);
 	ui_->btnCyclic->setEnabled(connected);
 	ui_->pushRun->setEnabled(connected);
+	ui_->btnJogPlus->setEnabled(connected);
+	ui_->btnJogMinus->setEnabled(connected);
+	ui_->btnJogStop->setEnabled(connected);
 	updateLoggingButtons();
 }
 

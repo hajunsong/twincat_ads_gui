@@ -86,6 +86,7 @@ class MainWindow : public QMainWindow {
 	void setupPathGenerationUi();
 	void setupSystemControlUi();
 	void setupModeOfOperationUi();
+	void setupJogModeUi();
 	void setupOperatingUi();
 	void setupSetPosShortcuts();
 	void setupLoggingUi();
@@ -94,6 +95,7 @@ class MainWindow : public QMainWindow {
 	QString stopLogging(bool silentStatus = false);
 	void updateLoggingButtons();
 	void writeClientMainSubCmd(std::uint16_t mainCmd, std::uint16_t subCmd);
+	void sendJogCommand(std::uint16_t subCmd);
 	void sendPathGeneration();
 	int resolvedPathMotorIndex() const;
 	static std::uint16_t pathProfileSubCmdFromComboIndex(int comboIndex);
