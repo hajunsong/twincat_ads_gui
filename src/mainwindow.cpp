@@ -116,7 +116,7 @@ static_assert(kServerToClientStCmdReadLen == 992, "");
 constexpr size_t kMotorCount = 31;
 constexpr int kMotorSetpointRow = static_cast<int>(kMotorCount);
 constexpr int kMotorTableRowCount = kMotorSetpointRow + 1;
-constexpr int kMotorTableColumnCount = 13;
+constexpr int kMotorTableColumnCount = 14;
 constexpr int kMotorPollIntervalMs = 100;
 constexpr int kLoggingAppendIntervalMs = 100;
 constexpr char kLoggingDirName[] = "logging";
@@ -140,7 +140,15 @@ enum MotorStTableCol : int {
 	kColSetPos = 10,
 	kColSetVel = 11,
 	kColSetTrq = 12,
+	kColDeg = 13,
 };
+
+constexpr int kLowerBodyZeroOffsetStartModule = 16;
+constexpr std::array<std::int32_t, 15> kLowerBodyZeroPositionOffset = {
+		55788, -38370, -40105, 3293,  -11998, -42117, -38805, -49858,
+		-34338, -24624, 22229, -10071, 4976,  8510,   -4324,
+};
+constexpr double kCountsPerDegree = 1000.0;
 
 enum MotorIndexRoles {
 	kMotorTableRoleRealModule = Qt::UserRole + 1,
@@ -270,6 +278,32 @@ QString formatWcState(uint8_t wc) {
 		default:
 			return QStringLiteral("? %1").arg(wc);
 	}
+}
+
+bool lowerBodyZeroOffsetForModule(int moduleId, std::int32_t *offsetOut) {
+	if (moduleId < kLowerBodyZeroOffsetStartModule ||
+			moduleId >= kLowerBodyZeroOffsetStartModule +
+												static_cast<int>(kLowerBodyZeroPositionOffset.size()) ||
+			offsetOut == nullptr) {
+		return false;
+	}
+	const std::size_t idx =
+			static_cast<std::size_t>(moduleId - kLowerBodyZeroOffsetStartModule);
+	*offsetOut = kLowerBodyZeroPositionOffset[idx];
+	return true;
+}
+
+QString formatDegForModuleFromActualPosition(int moduleId, std::int32_t actualPosition) {
+	std::int32_t zeroOffset = 0;
+	if (!lowerBodyZeroOffsetForModule(moduleId, &zeroOffset)) {
+		return QStringLiteral("—");
+	}
+	const double deg = static_cast<double>(actualPosition - zeroOffset) / kCountsPerDegree;
+	return QString::number(deg, 'f', 3);
+}
+
+bool isMotorSetpointColumn(int column) {
+	return column == kColSetPos || column == kColSetVel || column == kColSetTrq;
 }
 
 /** CiA 402 / CANopen-style device error (0x603F class); unknown → "Unknown (0x…)". */
@@ -423,7 +457,7 @@ void MainWindow::setupMotorStTable() {
 			 QStringLiteral("Mode"), QStringLiteral("WC"), QStringLiteral("Pos"),
 			 QStringLiteral("Vel"), QStringLiteral("Trq"), QStringLiteral("TgtPos"),
 			 QStringLiteral("FolErr"), QStringLiteral("Set pos"), QStringLiteral("Set vel"),
-			 QStringLiteral("Set trq")});
+			 QStringLiteral("Set trq"), QStringLiteral("Deg")});
 	const Qt::ItemFlags ro = Qt::ItemIsEnabled | Qt::ItemIsSelectable;
 	const Qt::ItemFlags roSetPos = ro | Qt::ItemIsEditable;
 	for (int r = 0; r < kMotorSetpointRow; ++r) {
@@ -451,7 +485,7 @@ void MainWindow::setupMotorStTable() {
 	motorStModel_.setItem(kMotorSetpointRow, 0, rowLabel);
 	for (int c = 1; c < kMotorTableColumnCount; ++c) {
 		auto *cell = new QStandardItem(
-				(c >= kColSetPos) ? QString() : QStringLiteral("—"));
+				isMotorSetpointColumn(c) ? QString() : QStringLiteral("—"));
 		cell->setFlags(ro);
 		motorStModel_.setItem(kMotorSetpointRow, c, cell);
 	}
@@ -526,7 +560,7 @@ void MainWindow::clearMotorStPollDataForRow(int row) {
 		return;
 	}
 	for (int c = 1; c < kMotorTableColumnCount; ++c) {
-		if (c == kColSetPos) {
+		if (isMotorSetpointColumn(c)) {
 			continue;
 		}
 		if (QStandardItem *it = motorStModel_.item(row, c)) {
@@ -633,7 +667,7 @@ void MainWindow::clearMotorStTable() {
 				if (c == kColWc) {
 					it->setText(formatWcState(kDefaultWcState));
 					it->setToolTip(QStringLiteral("raw=1 — Disconnected"));
-				} else if (c == kColSetPos) {
+				} else if (isMotorSetpointColumn(c)) {
 					it->setText(QString());
 					it->setToolTip(QString());
 				} else {
@@ -783,9 +817,9 @@ void MainWindow::setupSetPosShortcuts() {
 	f6->setContext(Qt::WindowShortcut);
 	connect(f6, &QShortcut::activated, this, [applySetPosPreset]() {
 		const std::vector<std::pair<int, std::int32_t>> rightLegUp = {
-				{16, 55077}, {17, -38906}, {18, -34736}, {19, -11789}, {20, -11039},
-				{21, -37820}, {22, -50521}, {23, -48195}, {24, -32584}, {25, -31077},
-				{26, 20407}, {27, -8314}, {28, 8514}, {29, 4951}, {30, -15797}};
+				{16, 55172}, {17, -39042}, {18, -34460}, {19, -25848}, {20, 15697},
+				{21, -28610}, {22, -3652}, {23, 50746},  {24, 50478},  {25, 17411},
+				{26, 57095}, {27, -6641},  {28, -46502}, {29, 20351},  {30, 39921}};
 		applySetPosPreset(rightLegUp, QStringLiteral("Right leg up"));
 	});
 
@@ -793,9 +827,9 @@ void MainWindow::setupSetPosShortcuts() {
 	f7->setContext(Qt::WindowShortcut);
 	connect(f7, &QShortcut::activated, this, [applySetPosPreset]() {
 		const std::vector<std::pair<int, std::int32_t>> leftLegUp = {
-				{16, 55647}, {17, -38713}, {18, -45080}, {19, 6917}, {20, -9456},
-				{21, -41121}, {22, -45913}, {23, -45136}, {24, -37402}, {25, -7247},
-				{26, 22334}, {27, -18038}, {28, 12816}, {29, 1809}, {30, -12233}};
+				{16, 55193}, {17, -38507}, {18, -48547}, {19, -68134}, {20, 6021},
+				{21, -44554}, {22, -4071}, {23, 50764},  {24, 50455},  {25, -35181},
+				{26, 50993}, {27, -27209}, {28, -60745}, {29, 20349},  {30, 39923}};
 		applySetPosPreset(leftLegUp, QStringLiteral("Left leg up"));
 	});
 }
@@ -1932,6 +1966,8 @@ void MainWindow::pollDataMotorSt() {
 		motorStModel_.item(r, kColPos)->setText(QString::number(m.nActualPosition));
 		motorStModel_.item(r, kColVel)->setText(QString::number(m.nActualVelocity));
 		motorStModel_.item(r, kColTrq)->setText(QString::number(m.nActualTorque));
+		motorStModel_.item(r, kColDeg)->setText(
+				formatDegForModuleFromActualPosition(r, m.nActualPosition));
 		if (c) {
 			motorStModel_.item(r, kColTgtPos)->setText(QString::number(c->nTargetPosition));
 			const qint64 following =
