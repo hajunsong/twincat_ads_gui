@@ -31,6 +31,7 @@ struct AdsBodyScopeProfile {
 	AdsAccessSpec mainCmd;
 	AdsAccessSpec subCmd;
 	AdsAccessSpec pathCmd;
+	AdsAccessSpec jogCmd;
 	AdsAccessSpec loggingBuffer;
 	bool contiguousStCmdRead;
 };

@@ -6,7 +6,9 @@
 enum class BodyScope {
 	WholeBody = 0,
 	UpperBody = 1,
-	LowerBody = 2,
+	UpperBodyMini = 2,
+	LowerBody = 3,
+	Module = 4,
 };
 
 struct BodyScopeRange {
@@ -19,8 +21,12 @@ inline BodyScopeRange bodyScopeRange(BodyScope scope) {
 	switch (scope) {
 		case BodyScope::UpperBody:
 			return {0, 15, 16};
+		case BodyScope::UpperBodyMini:
+			return {2, 8, 7};
 		case BodyScope::LowerBody:
 			return {16, 30, 15};
+		case BodyScope::Module:
+			return {0, 0, 1};
 		case BodyScope::WholeBody:
 		default:
 			return {0, 30, 31};

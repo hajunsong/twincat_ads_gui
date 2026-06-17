@@ -22,6 +22,7 @@
 #include <QDoubleSpinBox>
 #include <QFont>
 #include <QGuiApplication>
+#include <QGridLayout>
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QScreen>
@@ -52,6 +53,7 @@ namespace {
 constexpr char kSettingsGroup[] = "connection";
 constexpr char kWindowSettingsGroup[] = "window";
 constexpr char kMotorStColsSettingsGroup[] = "motorStCols";
+constexpr char kSavePosSettingsGroup[] = "savePos";
 constexpr char kBodyScopeSettingKey[] = "bodyScope";
 
 struct BodyScopeEndpoint {
@@ -62,6 +64,29 @@ struct BodyScopeEndpoint {
 constexpr BodyScopeEndpoint kUpperBodyEndpoint = {"192.168.0.142", "221.102.111.71.1.1"};
 constexpr BodyScopeEndpoint kLowerBodyEndpoint = {"192.168.0.132", "221.103.14.13.1.1"};
 
+constexpr std::uint32_t kUpperBodyMiniDataMotorStIndexOffset = 0x83000000;
+constexpr std::uint32_t kUpperBodyMiniDataMotorCmdIndexOffset = 0x83000069;
+constexpr std::uint32_t kUpperBodyMiniMainCmdIndexOffset = 0x84000000;
+constexpr std::uint32_t kUpperBodyMiniSubCmdIndexOffset = 0x84000002;
+constexpr std::uint32_t kUpperBodyMiniPathCmdIndexOffset = 0x84000004;
+constexpr std::uint32_t kUpperBodyMiniJogCmdIndexOffset = 0x84000097;
+constexpr std::size_t kUpperBodyMiniModuleCount = 7;
+constexpr std::size_t kUpperBodyMiniDataMotorStByteLen = 105;
+constexpr std::size_t kUpperBodyMiniDataMotorCmdByteLen = 105;
+constexpr std::size_t kUpperBodyMiniPathCmdByteLen = 147;
+static_assert(kUpperBodyMiniDataMotorStByteLen == kUpperBodyMiniModuleCount * 15, "");
+static_assert(kUpperBodyMiniDataMotorCmdByteLen == kUpperBodyMiniModuleCount * 15, "");
+
+constexpr std::uint32_t kModuleDataMotorStIndexOffset = 0x83000000;
+constexpr std::uint32_t kModuleDataMotorCmdIndexOffset = 0x8300000F;
+constexpr std::uint32_t kModuleMainCmdIndexOffset = 0x84000000;
+constexpr std::uint32_t kModuleSubCmdIndexOffset = 0x84000002;
+constexpr std::uint32_t kModulePathCmdIndexOffset = 0x84000004;
+constexpr std::uint32_t kModuleJogCmdIndexOffset = 0x84000019;
+constexpr std::size_t kModuleDataMotorStByteLen = 15;
+constexpr std::size_t kModuleDataMotorCmdByteLen = 15;
+constexpr std::size_t kModulePathCmdByteLen = 21;
+
 constexpr AdsBodyScopeProfile kWholeBodyAdsProfile = {
 		350,
 		{0x1010010, 0x83000000, 496u},
@@ -69,6 +94,7 @@ constexpr AdsBodyScopeProfile kWholeBodyAdsProfile = {
 		{0x1010010, 0x84000000, 2u},
 		{0x1010010, 0x84000002, 2u},
 		{0x1010010, 0x84000004, static_cast<std::uint32_t>(kTwinCatPathCmdByteLen)},
+		{0x1010010, 0x840001D5, 4u},
 		{0x1010010, 0x85000000, static_cast<std::uint32_t>(sizeof(TwinCatLoggingBufferData))},
 		true,
 };
@@ -83,8 +109,39 @@ constexpr AdsBodyScopeProfile kUpperBodyAdsProfile = {
 		{kTcModuleAdsIndexGroup, kUpperBodySubCmdIndexOffset, 2u},
 		{kTcModuleAdsIndexGroup, kUpperBodyPathCmdIndexOffset,
 		 static_cast<std::uint32_t>(kUpperBodyPathCmdByteLen)},
+		{kTcModuleAdsIndexGroup, 0x840001D5, 4u},
 		{kTcModuleAdsIndexGroup, kUpperBodyLoggingBufferIndexOffset,
 		 static_cast<std::uint32_t>(kUpperBodyLoggingBufferByteLen)},
+		false,
+};
+
+constexpr AdsBodyScopeProfile kUpperBodyMiniAdsProfile = {
+		350,
+		{kTcModuleAdsIndexGroup, kUpperBodyMiniDataMotorStIndexOffset,
+		 static_cast<std::uint32_t>(kUpperBodyMiniDataMotorStByteLen)},
+		{kTcModuleAdsIndexGroup, kUpperBodyMiniDataMotorCmdIndexOffset,
+		 static_cast<std::uint32_t>(kUpperBodyMiniDataMotorCmdByteLen)},
+		{kTcModuleAdsIndexGroup, kUpperBodyMiniMainCmdIndexOffset, 2u},
+		{kTcModuleAdsIndexGroup, kUpperBodyMiniSubCmdIndexOffset, 2u},
+		{kTcModuleAdsIndexGroup, kUpperBodyMiniPathCmdIndexOffset,
+		 static_cast<std::uint32_t>(kUpperBodyMiniPathCmdByteLen)},
+		{kTcModuleAdsIndexGroup, kUpperBodyMiniJogCmdIndexOffset, 4u},
+		{0u, 0u, 0u},
+		false,
+};
+
+constexpr AdsBodyScopeProfile kModuleAdsProfile = {
+		350,
+		{kTcModuleAdsIndexGroup, kModuleDataMotorStIndexOffset,
+		 static_cast<std::uint32_t>(kModuleDataMotorStByteLen)},
+		{kTcModuleAdsIndexGroup, kModuleDataMotorCmdIndexOffset,
+		 static_cast<std::uint32_t>(kModuleDataMotorCmdByteLen)},
+		{kTcModuleAdsIndexGroup, kModuleMainCmdIndexOffset, 2u},
+		{kTcModuleAdsIndexGroup, kModuleSubCmdIndexOffset, 2u},
+		{kTcModuleAdsIndexGroup, kModulePathCmdIndexOffset,
+		 static_cast<std::uint32_t>(kModulePathCmdByteLen)},
+		{kTcModuleAdsIndexGroup, kModuleJogCmdIndexOffset, 4u},
+		{0u, 0u, 0u},
 		false,
 };
 
@@ -98,6 +155,7 @@ constexpr AdsBodyScopeProfile kLowerBodyAdsProfile = {
 		{kTcModuleAdsIndexGroup, kLowerBodySubCmdIndexOffset, 2u},
 		{kTcModuleAdsIndexGroup, kLowerBodyPathCmdIndexOffset,
 		 static_cast<std::uint32_t>(kLowerBodyPathCmdByteLen)},
+		{kTcModuleAdsIndexGroup, 0x840001D5, 4u},
 		{kTcModuleAdsIndexGroup, kLowerBodyLoggingBufferIndexOffset,
 		 static_cast<std::uint32_t>(kLowerBodyLoggingBufferByteLen)},
 		false,
@@ -116,7 +174,7 @@ static_assert(kServerToClientStCmdReadLen == 992, "");
 constexpr size_t kMotorCount = 31;
 constexpr int kMotorSetpointRow = static_cast<int>(kMotorCount);
 constexpr int kMotorTableRowCount = kMotorSetpointRow + 1;
-constexpr int kMotorTableColumnCount = 14;
+constexpr int kMotorTableColumnCount = 15;
 constexpr int kMotorPollIntervalMs = 100;
 constexpr int kLoggingAppendIntervalMs = 100;
 constexpr char kLoggingDirName[] = "logging";
@@ -137,10 +195,11 @@ enum MotorStTableCol : int {
 	kColTrq = 7,
 	kColTgtPos = 8,
 	kColFolErr = 9,
-	kColSetPos = 10,
-	kColSetVel = 11,
-	kColSetTrq = 12,
-	kColDeg = 13,
+	kColCmdPos = 10,
+	kColSetPos = 11,
+	kColSetVel = 12,
+	kColSetTrq = 13,
+	kColDeg = 14,
 };
 
 constexpr int kLowerBodyZeroOffsetStartModule = 16;
@@ -192,14 +251,35 @@ static_assert(kMotorCount == kTwinCatLogMotorCount,
 /** ClientToServer: MainCmd @ 0x84000000, SubCmd @ 0x84000002 — one write, 4 bytes. */
 constexpr uint32_t kClientMainSubIndexGroup = 0x1010010;
 constexpr uint32_t kClientMainSubIndexOffset = 0x84000000;
-constexpr uint32_t kClientJogPayloadIndexGroup = 0x1010010;
-constexpr uint32_t kClientJogPayloadIndexOffset = 0x840001D5;
-
 std::size_t motorCmdWireStrideForProfile(const AdsBodyScopeProfile &profile) {
 	if (profile.contiguousStCmdRead) {
 		return kMotorCmdWireStrideWholeBody;
 	}
 	return kMotorCmdWireStrideUpperBody;
+}
+
+const char *bodyScopeLabel(BodyScope scope) {
+	switch (scope) {
+		case BodyScope::WholeBody:
+			return "WholeBody";
+		case BodyScope::UpperBody:
+			return "UpperBody";
+		case BodyScope::UpperBodyMini:
+			return "UpperBodyMini";
+		case BodyScope::LowerBody:
+			return "LowerBody";
+		case BodyScope::Module:
+			return "Module";
+	}
+	return "Unknown";
+}
+
+bool bodyScopeSupportsLogging(BodyScope scope) {
+	return scope != BodyScope::UpperBodyMini && scope != BodyScope::Module;
+}
+
+bool bodyScopeUsesCompactMotorSt(BodyScope scope) {
+	return scope == BodyScope::UpperBodyMini || scope == BodyScope::Module;
 }
 
 #pragma pack(push, 1)
@@ -219,6 +299,30 @@ struct ClientJogPayload {
 #pragma pack(pop)
 
 static_assert(sizeof(ClientJogPayload) == 4, "Jog ID+Tick UINT pair");
+
+#pragma pack(push, 1)
+struct UpperBodyMiniMotorStWire {
+	std::uint16_t nStatusWord;
+	std::int32_t nActualPosition;
+	std::int32_t nActualVelocity;
+	std::int16_t nActualTorque;
+	std::uint16_t nErrorCode;
+	std::int8_t nModeOfOperationDisplay;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(UpperBodyMiniMotorStWire) == 15, "");
+
+#pragma pack(push, 1)
+struct UpperBodyMiniPathParameter {
+	double nTotalTime;
+	double nStepSize;
+	std::uint8_t nUpdate;	// BOOL
+	std::int32_t nSetPosition;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(UpperBodyMiniPathParameter) == 21, "");
 
 /** CiA 402–style statusword (0x6041): state from bits 0–3,5–6 + common flags. */
 QString formatMotorStatusWord(uint16_t sw) {
@@ -303,7 +407,8 @@ QString formatDegForModuleFromActualPosition(int moduleId, std::int32_t actualPo
 }
 
 bool isMotorSetpointColumn(int column) {
-	return column == kColSetPos || column == kColSetVel || column == kColSetTrq;
+	return column == kColCmdPos || column == kColSetPos || column == kColSetVel ||
+				 column == kColSetTrq;
 }
 
 /** CiA 402 / CANopen-style device error (0x603F class); unknown → "Unknown (0x…)". */
@@ -456,8 +561,8 @@ void MainWindow::setupMotorStTable() {
 			{QStringLiteral("#"), QStringLiteral("SW"), QStringLiteral("Err"),
 			 QStringLiteral("Mode"), QStringLiteral("WC"), QStringLiteral("Pos"),
 			 QStringLiteral("Vel"), QStringLiteral("Trq"), QStringLiteral("TgtPos"),
-			 QStringLiteral("FolErr"), QStringLiteral("Set pos"), QStringLiteral("Set vel"),
-			 QStringLiteral("Set trq"), QStringLiteral("Deg")});
+			 QStringLiteral("FolErr"), QStringLiteral("CmdPos"), QStringLiteral("Save Pos"),
+			 QStringLiteral("Set vel"), QStringLiteral("Set trq"), QStringLiteral("Deg")});
 	const Qt::ItemFlags ro = Qt::ItemIsEnabled | Qt::ItemIsSelectable;
 	const Qt::ItemFlags roSetPos = ro | Qt::ItemIsEditable;
 	for (int r = 0; r < kMotorSetpointRow; ++r) {
@@ -470,7 +575,7 @@ void MainWindow::setupMotorStTable() {
 				cell = new QStandardItem(formatWcState(kDefaultWcState));
 				cell->setToolTip(QStringLiteral("raw=1 — Disconnected"));
 				cell->setFlags(ro);
-			} else if (c == kColSetPos) {
+			} else if (c == kColCmdPos || c == kColSetPos) {
 				cell = new QStandardItem(QString());
 				cell->setFlags(roSetPos);
 			} else {
@@ -500,12 +605,13 @@ void MainWindow::applyMotorStColumnVisibility() {
 			{ui_->cbMotorColMode, kColMode},   {ui_->cbMotorColWc, kColWc},
 			{ui_->cbMotorColErr, kColErr},     {ui_->cbMotorColTrq, kColTrq},
 			{ui_->cbMotorColTgtPos, kColTgtPos},
-			{ui_->cbMotorColSetPos, kColSetPos}, {ui_->cbMotorColSetVel, kColSetVel},
+			{ui_->cbMotorColSetPos, kColCmdPos}, {ui_->cbMotorColSetVel, kColSetVel},
 			{ui_->cbMotorColSetTrq, kColSetTrq},
 	};
 	for (const auto &t : toggles) {
 		tv->setColumnHidden(t.col, !t.cb->isChecked());
 	}
+	tv->setColumnHidden(kColSetPos, !ui_->cbMotorColSetPos->isChecked());
 }
 
 void MainWindow::setupMotorStColumnVisibility() {
@@ -613,7 +719,7 @@ void MainWindow::printBodyScopeDiagnostics() const {
 	const int lastLocalSlot = range.moduleCount - 1;
 	const int lastRealModule = realModuleForLocalSlot(lastLocalSlot, bodyScope_);
 	const std::size_t slot = static_cast<std::size_t>(lastLocalSlot);
-	const char *label = (bodyScope_ == BodyScope::UpperBody) ? "UpperBody" : "LowerBody";
+	const char *label = bodyScopeLabel(bodyScope_);
 	qDebug().nospace()
 			<< label << " scope: firstRealModule=" << range.firstModule
 			<< " lastRealModule=" << range.lastModule << " moduleCount=" << range.moduleCount
@@ -621,9 +727,13 @@ void MainWindow::printBodyScopeDiagnostics() const {
 			<< " DataMotorStLen=" << profile.dataMotorSt.byteLength
 			<< " DataMotorCmdLen=" << profile.dataMotorCmd.byteLength
 			<< " PathCmdLen=" << profile.pathCmd.byteLength
-			<< " slot" << lastLocalSlot << " StOff=" << (slot * kMotorStWireStride)
+			<< " slot" << lastLocalSlot
+			<< " StOff="
+			<< (slot * (bodyScopeUsesCompactMotorSt(bodyScope_)
+								 ? sizeof(UpperBodyMiniMotorStWire)
+								 : kMotorStWireStride))
 			<< " CmdOff=" << (slot * kMotorCmdWireStrideUpperBody)
-			<< " PathOff=" << (slot * sizeof(PathParameter));
+			<< " PathOff=" << (profile.pathCmd.byteLength / qMax(1, range.moduleCount) * slot);
 }
 
 void MainWindow::printBodyScopePollDiagnostics(const std::uint8_t *stRaw, std::size_t stByteLen,
@@ -637,19 +747,34 @@ void MainWindow::printBodyScopePollDiagnostics(const std::uint8_t *stRaw, std::s
 	const AdsBodyScopeProfile &profile = currentAdsProfile();
 	const std::size_t lastSlot = static_cast<std::size_t>(range.moduleCount - 1);
 	const int lastRealModule = realModuleForLocalSlot(static_cast<int>(lastSlot), bodyScope_);
-	const bool stOk = motorStWireFits(stByteLen, lastSlot);
+	const bool stOk =
+			(bodyScopeUsesCompactMotorSt(bodyScope_))
+					? (lastSlot * sizeof(UpperBodyMiniMotorStWire) + sizeof(UpperBodyMiniMotorStWire) <=
+						 stByteLen)
+					: motorStWireFits(stByteLen, lastSlot);
 	const bool cmdOk = cmdRaw != nullptr && motorCmdWireFits(cmdByteLen, lastSlot, cmdStride);
 	const bool pathOk = pathParameterFits(profile.pathCmd.byteLength, lastSlot);
-	const char *label = (bodyScope_ == BodyScope::UpperBody) ? "UpperBody" : "LowerBody";
+	const char *label = bodyScopeLabel(bodyScope_);
 	qDebug().nospace()
 			<< label << " poll slot" << lastSlot << ": stFits=" << stOk << " cmdFits=" << cmdOk
 			<< " pathFits=" << pathOk << " stBytes=" << stByteLen << " cmdBytes=" << cmdByteLen;
 	if (stOk) {
-		const MotorStWire &m = *motorStWireAt(stRaw, lastSlot);
-		qDebug().nospace() << label << " slot" << lastSlot << "->M" << lastRealModule
-											 << " MotorSt: pos=" << m.nActualPosition
-											 << " vel=" << m.nActualVelocity << " mode=" << m.nModeOfOperationDisplay
-											 << " wc=" << static_cast<unsigned>(m.nWcState);
+		if (bodyScopeUsesCompactMotorSt(bodyScope_)) {
+			const auto &m =
+					*reinterpret_cast<const UpperBodyMiniMotorStWire *>(
+							stRaw + lastSlot * sizeof(UpperBodyMiniMotorStWire));
+			qDebug().nospace() << label << " slot" << lastSlot << "->M" << lastRealModule
+												 << " MotorSt: pos=" << m.nActualPosition
+												 << " vel=" << m.nActualVelocity
+												 << " mode=" << m.nModeOfOperationDisplay;
+		} else {
+			const MotorStWire &m = *motorStWireAt(stRaw, lastSlot);
+			qDebug().nospace() << label << " slot" << lastSlot << "->M" << lastRealModule
+												 << " MotorSt: pos=" << m.nActualPosition
+												 << " vel=" << m.nActualVelocity
+												 << " mode=" << m.nModeOfOperationDisplay
+												 << " wc=" << static_cast<unsigned>(m.nWcState);
+		}
 	}
 	if (cmdOk) {
 		const MotorCmdWire &c = *motorCmdWireAt(cmdRaw, lastSlot, cmdStride);
@@ -699,6 +824,7 @@ void MainWindow::setupPathGenerationUi() {
 	ui_->cbIndex->clear();
 	rebuildPathIndexCombo();
 	ui_->cbIndex->setMaxVisibleItems(10);
+	ui_->cbProfileMode->setCurrentIndex(1);
 
 	connect(ui_->cbAll, &QCheckBox::toggled, this, [this](bool) {
 		ui_->cbIndex->setEnabled(!ui_->cbAll->isChecked());
@@ -733,7 +859,7 @@ void MainWindow::setupModeOfOperationUi() {
 }
 
 void MainWindow::setupJogModeUi() {
-	ui_->jogTick->setText(QStringLiteral("5"));
+	ui_->jogTick->setText(QStringLiteral("3000"));
 	connect(ui_->btnJogPlus, &QPushButton::clicked, this, [this]() {
 		sendJogCommand(kCmdSubJogPlus);
 	});
@@ -753,7 +879,7 @@ void MainWindow::setupSetPosShortcuts() {
 			if (!moduleInCurrentScope(r)) {
 				continue;
 			}
-			if (QStandardItem *it = motorStModel_.item(r, kColSetPos)) {
+			if (QStandardItem *it = motorStModel_.item(r, kColCmdPos)) {
 				it->setText(QString::number(kSetPosShortcutFillValue));
 			}
 		}
@@ -765,7 +891,7 @@ void MainWindow::setupSetPosShortcuts() {
 			if (!moduleInCurrentScope(r)) {
 				continue;
 			}
-			if (QStandardItem *it = motorStModel_.item(r, kColSetPos)) {
+			if (QStandardItem *it = motorStModel_.item(r, kColCmdPos)) {
 				it->setText(QStringLiteral("0"));
 			}
 		}
@@ -782,11 +908,7 @@ void MainWindow::setupSetPosShortcuts() {
 									 .arg(motorTablePosition(module));
 		}
 		qDebug().noquote() << QStringLiteral("Current positions [%1]: %2")
-																.arg((bodyScope_ == BodyScope::WholeBody)
-																				 ? QStringLiteral("WholeBody")
-																				 : (bodyScope_ == BodyScope::UpperBody)
-																							 ? QStringLiteral("UpperBody")
-																							 : QStringLiteral("LowerBody"))
+																.arg(QString::fromUtf8(bodyScopeLabel(bodyScope_)))
 																.arg(lines.join(QStringLiteral(", ")));
 		statusBar()->showMessage(
 				QStringLiteral("Current positions printed to debug log (%1 motors).")
@@ -803,7 +925,7 @@ void MainWindow::setupSetPosShortcuts() {
 					if (row < 0 || row >= kMotorSetpointRow) {
 						continue;
 					}
-					if (QStandardItem *cell = motorStModel_.item(row, kColSetPos)) {
+					if (QStandardItem *cell = motorStModel_.item(row, kColCmdPos)) {
 						cell->setText(QString::number(entry.second));
 						++applied;
 					}
@@ -832,6 +954,24 @@ void MainWindow::setupSetPosShortcuts() {
 				{26, 50993}, {27, -27209}, {28, -60745}, {29, 20349},  {30, 39923}};
 		applySetPosPreset(leftLegUp, QStringLiteral("Left leg up"));
 	});
+
+	auto *f9 = new QShortcut(QKeySequence(Qt::Key_F9), this);
+	f9->setContext(Qt::WindowShortcut);
+	connect(f9, &QShortcut::activated, this, [this]() {
+		int applied = 0;
+		for (int r = 0; r < kMotorSetpointRow; ++r) {
+			if (!moduleInCurrentScope(r)) {
+				continue;
+			}
+			if (QStandardItem *cell = motorStModel_.item(r, kColSetPos)) {
+				cell->setText(QString::number(motorTablePosition(r)));
+				++applied;
+			}
+		}
+		statusBar()->showMessage(
+				QStringLiteral("Current position copied to Save Pos for %1 motors.").arg(applied),
+				3000);
+	});
 }
 
 void MainWindow::setupLoggingUi() {
@@ -841,13 +981,21 @@ void MainWindow::setupLoggingUi() {
 
 void MainWindow::updateLoggingButtons() {
 	const bool conn = device_ != nullptr;
-	ui_->pushButton->setEnabled(conn && !loggingActive_);
-	ui_->pushButton_2->setEnabled(conn && loggingActive_);
+	const bool supportsLogging = bodyScopeSupportsLogging(bodyScope_);
+	ui_->pushButton->setEnabled(supportsLogging && conn && !loggingActive_);
+	ui_->pushButton_2->setEnabled(supportsLogging && conn && loggingActive_);
+	ui_->lineEdit->setEnabled(supportsLogging);
 }
 
 void MainWindow::startLogging() {
 	if (loggingActive_) {
 		statusBar()->showMessage(QStringLiteral("Logging is already running."), 3000);
+		return;
+	}
+	if (!bodyScopeSupportsLogging(bodyScope_)) {
+		QMessageBox::information(
+				this, QStringLiteral("Logging"),
+				QStringLiteral("Logging is not supported for %1.").arg(QString::fromUtf8(bodyScopeLabel(bodyScope_))));
 		return;
 	}
 	if (!device_) {
@@ -1152,6 +1300,7 @@ void MainWindow::setupOperatingUi() {
 		if (!device_) {
 			return;
 		}
+		sendPathGeneration();
 		onPathMotionStart();
 		writeClientMainSubCmd(kCmdMainPath, kCmdSubPathOpRun);
 	});
@@ -1176,6 +1325,58 @@ void MainWindow::setupOperatingUi() {
 		onPathMotionStart();
 		writeClientMainSubCmd(kCmdMainPath, kCmdSubPathOpCyclic);
 	});
+
+	auto *operatingLayout = ui_->groupBox_5->findChild<QGridLayout *>(QStringLiteral("gridLayout_6"));
+	if (operatingLayout) {
+		auto *btnZero = ui_->groupBox_5->findChild<QPushButton *>(QStringLiteral("btnZero"));
+		if (!btnZero) {
+			btnZero = new QPushButton(QStringLiteral("Zero"), ui_->groupBox_5);
+			btnZero->setObjectName(QStringLiteral("btnZero"));
+			btnZero->setEnabled(false);
+			operatingLayout->addWidget(btnZero, 0, 2);
+		}
+		auto *btnSaveRun =
+				ui_->groupBox_5->findChild<QPushButton *>(QStringLiteral("btnSaveRun"));
+		if (!btnSaveRun) {
+			btnSaveRun = new QPushButton(QStringLiteral("Save Run"), ui_->groupBox_5);
+			btnSaveRun->setObjectName(QStringLiteral("btnSaveRun"));
+			btnSaveRun->setEnabled(false);
+			operatingLayout->addWidget(btnSaveRun, 1, 2);
+		}
+		connect(btnZero, &QPushButton::clicked, this, [this, onPathMotionStart]() {
+			if (!device_) {
+				return;
+			}
+			const BodyScopeRange range = currentBodyScopeRange();
+			for (int r = range.firstModule; r <= range.lastModule; ++r) {
+				if (QStandardItem *cell = motorStModel_.item(r, kColCmdPos)) {
+					cell->setText(QStringLiteral("0"));
+				}
+			}
+			ui_->cbAll->setChecked(true);
+			sendPathGeneration();
+			onPathMotionStart();
+			writeClientMainSubCmd(kCmdMainPath, kCmdSubPathOpRun);
+		});
+		connect(btnSaveRun, &QPushButton::clicked, this, [this, onPathMotionStart]() {
+			if (!device_) {
+				return;
+			}
+			const BodyScopeRange range = currentBodyScopeRange();
+			for (int r = range.firstModule; r <= range.lastModule; ++r) {
+				QStandardItem *savePos = motorStModel_.item(r, kColSetPos);
+				QStandardItem *cmdPos = motorStModel_.item(r, kColCmdPos);
+				if (!savePos || !cmdPos) {
+					continue;
+				}
+				cmdPos->setText(savePos->text());
+			}
+			ui_->cbAll->setChecked(true);
+			sendPathGeneration();
+			onPathMotionStart();
+			writeClientMainSubCmd(kCmdMainPath, kCmdSubPathOpRun);
+		});
+	}
 }
 
 int MainWindow::pathProgressPercent(std::int32_t start, std::int32_t target,
@@ -1211,7 +1412,7 @@ std::int32_t MainWindow::motorTableSetPosition(int row) const {
 	if (row < 0 || row >= kMotorSetpointRow) {
 		return 0;
 	}
-	QStandardItem *sp = motorStModel_.item(row, kColSetPos);
+	QStandardItem *sp = motorStModel_.item(row, kColCmdPos);
 	return parseSetPositionCell(sp ? sp->text() : QString(), motorTablePosition(row));
 }
 
@@ -1404,8 +1605,9 @@ void MainWindow::sendJogCommand(std::uint16_t subCmd) {
 	payload.tick = tick;
 
 	writeClientMainSubCmd(kCmdMainJog, subCmd);
-	const long err = device_->WriteReqEx(kClientJogPayloadIndexGroup, kClientJogPayloadIndexOffset,
-																			 sizeof(payload), &payload);
+	const AdsBodyScopeProfile &profile = currentAdsProfile();
+	const long err = device_->WriteReqEx(profile.jogCmd.indexGroup, profile.jogCmd.indexOffset,
+																			 profile.jogCmd.byteLength, &payload);
 	if (err != 0) {
 		statusBar()->showMessage(
 				QStringLiteral("Jog payload write failed: ADS %1 (Main=%2 Sub=%3, ID=%4 Tick=%5)")
@@ -1438,7 +1640,8 @@ int MainWindow::resolvedPathMotorIndex() const {
 	if (ok && moduleInCurrentScope(fromData)) {
 		return fromData;
 	}
-	if (bodyScope_ == BodyScope::LowerBody) {
+	if (bodyScope_ == BodyScope::LowerBody || bodyScope_ == BodyScope::UpperBodyMini ||
+			bodyScope_ == BodyScope::Module) {
 		const int displayIdx = ui_->cbIndex->currentText().trimmed().toInt(&ok);
 		if (ok) {
 			const BodyScopeRange range = currentBodyScopeRange();
@@ -1519,6 +1722,15 @@ bool MainWindow::readMotorActualPositions(
 			continue;
 		}
 		const std::size_t slot = static_cast<std::size_t>(localSlot);
+		if (bodyScopeUsesCompactMotorSt(bodyScope_)) {
+			const std::size_t byteOffset = slot * sizeof(UpperBodyMiniMotorStWire);
+			if (byteOffset + sizeof(UpperBodyMiniMotorStWire) <= raw.size()) {
+				const auto *m =
+						reinterpret_cast<const UpperBodyMiniMotorStWire *>(raw.data() + byteOffset);
+				(*out)[static_cast<std::size_t>(i)] = m->nActualPosition;
+			}
+			continue;
+		}
 		if (motorStWireFits(raw.size(), slot)) {
 			(*out)[static_cast<std::size_t>(i)] = motorStWireAt(raw.data(), slot)->nActualPosition;
 		}
@@ -1537,7 +1749,8 @@ void MainWindow::sendPathGeneration() {
 		if (onlyIdx < 0) {
 			const BodyScopeRange range = currentBodyScopeRange();
 			const QString indexHint =
-					(bodyScope_ == BodyScope::LowerBody)
+					(bodyScope_ == BodyScope::LowerBody || bodyScope_ == BodyScope::UpperBodyMini ||
+					 bodyScope_ == BodyScope::Module)
 							? QStringLiteral("0–%1 (M%2–M%3)")
 										.arg(range.moduleCount - 1)
 										.arg(range.firstModule)
@@ -1584,7 +1797,7 @@ void MainWindow::sendPathGeneration() {
 	}
 
 	auto nSetPositionForRow = [this, &actualPos](int row) -> std::int32_t {
-		QStandardItem *sp = motorStModel_.item(row, kColSetPos);
+		QStandardItem *sp = motorStModel_.item(row, kColCmdPos);
 		return parseSetPositionCell(sp ? sp->text() : QString(),
 																actualPos[static_cast<std::size_t>(row)]);
 	};
@@ -1602,6 +1815,94 @@ void MainWindow::sendPathGeneration() {
 		p->nUpdate = 1;
 		p->nSetPosition = nSetPositionForRow(row);
 	};
+
+	auto fillUpperBodyMiniPathParameter = [&](UpperBodyMiniPathParameter *p, int row) {
+		p->nTotalTime = totalTime;
+		p->nStepSize = stepSize;
+		p->nUpdate = 1u;
+		p->nSetPosition = nSetPositionForRow(row);
+	};
+
+	if (bodyScopeUsesCompactMotorSt(bodyScope_)) {
+		const std::size_t pathCmdLen = adsProfile.pathCmd.byteLength;
+		std::vector<std::uint8_t> pathCmdRaw(pathCmdLen);
+		std::uint32_t bytesRead = 0;
+		const long readErr =
+				device_->ReadReqEx2(adsProfile.pathCmd.indexGroup, adsProfile.pathCmd.indexOffset,
+														pathCmdRaw.size(), pathCmdRaw.data(), &bytesRead);
+		if (readErr != 0 || bytesRead != pathCmdLen) {
+			QMessageBox::warning(
+					this, QStringLiteral("Path generation"),
+					QStringLiteral("Could not read current PathCmd from PLC (ADS %1, %2 / %3 B).")
+							.arg(readErr)
+							.arg(bytesRead)
+							.arg(static_cast<int>(pathCmdLen)));
+			return;
+		}
+		const BodyScopeRange range = currentBodyScopeRange();
+		if (!all) {
+			int localSlot = 0;
+			if (!localSlotForModuleChecked(onlyIdx, bodyScope_, &localSlot)) {
+				QMessageBox::warning(this, QStringLiteral("Path generation"),
+													 QStringLiteral("Module M%1 is outside the current body scope.")
+															 .arg(onlyIdx));
+				return;
+			}
+			const std::size_t byteOffset =
+					static_cast<std::size_t>(localSlot) * sizeof(UpperBodyMiniPathParameter);
+			if (byteOffset + sizeof(UpperBodyMiniPathParameter) > pathCmdRaw.size()) {
+				QMessageBox::warning(this, QStringLiteral("Path generation"),
+													 QStringLiteral("PathCmd slot out of range for M%1.")
+															 .arg(onlyIdx));
+				return;
+			}
+			auto *one = reinterpret_cast<UpperBodyMiniPathParameter *>(pathCmdRaw.data() + byteOffset);
+			fillUpperBodyMiniPathParameter(one, onlyIdx);
+		} else {
+			for (int i = range.firstModule; i <= range.lastModule; ++i) {
+				int localSlot = 0;
+				if (!localSlotForModuleChecked(i, bodyScope_, &localSlot)) {
+					continue;
+				}
+				const std::size_t byteOffset =
+						static_cast<std::size_t>(localSlot) * sizeof(UpperBodyMiniPathParameter);
+				if (byteOffset + sizeof(UpperBodyMiniPathParameter) > pathCmdRaw.size()) {
+					continue;
+				}
+				auto *one =
+						reinterpret_cast<UpperBodyMiniPathParameter *>(pathCmdRaw.data() + byteOffset);
+				fillUpperBodyMiniPathParameter(one, i);
+			}
+		}
+		writeClientMainSubCmd(kCmdMainPath, subCmd);
+		const long writeErr =
+				device_->WriteReqEx(adsProfile.pathCmd.indexGroup, adsProfile.pathCmd.indexOffset,
+														static_cast<std::uint32_t>(pathCmdLen), pathCmdRaw.data());
+		if (writeErr != 0) {
+			statusBar()->showMessage(
+					QStringLiteral("PathCmd write failed: ADS %1 (Main=%2 Sub=%3, %4 B)")
+							.arg(writeErr)
+							.arg(kCmdMainPath)
+							.arg(subCmd)
+							.arg(static_cast<int>(pathCmdLen)),
+					8000);
+			return;
+		}
+		statusBar()->showMessage(
+				QStringLiteral("PathCmd sent — Main=%1 Sub=%2 (%3), %4 B")
+						.arg(kCmdMainPath)
+						.arg(subCmd)
+						.arg(all ? QStringLiteral("index 0–%1 (M%2–M%3) updated, rest from PLC")
+														 .arg(range.moduleCount - 1)
+														 .arg(range.firstModule)
+														 .arg(range.lastModule)
+											 : QStringLiteral("index %1 (M%2) updated, rest from PLC")
+														 .arg(displayIndexForRealModule(onlyIdx, bodyScope_))
+														 .arg(onlyIdx))
+						.arg(static_cast<int>(pathCmdLen)),
+				5000);
+		return;
+	}
 
 	if (isScopedPathCmdByteLength(adsProfile.pathCmd.byteLength)) {
 		const std::size_t pathCmdLen = adsProfile.pathCmd.byteLength;
@@ -1666,7 +1967,8 @@ void MainWindow::sendPathGeneration() {
 														 .arg(range.moduleCount - 1)
 														 .arg(range.firstModule)
 														 .arg(range.lastModule)
-											 : (bodyScope_ == BodyScope::LowerBody
+											 : ((bodyScope_ == BodyScope::LowerBody || bodyScope_ == BodyScope::UpperBodyMini ||
+														bodyScope_ == BodyScope::Module)
 															? QStringLiteral("index %1 (M%2) updated, rest from PLC")
 																		.arg(displayIndexForRealModule(onlyIdx, bodyScope_))
 																		.arg(onlyIdx)
@@ -1749,6 +2051,13 @@ void MainWindow::setConnectedUi(bool connected) {
 	ui_->btnRepeat->setEnabled(connected);
 	ui_->btnCyclic->setEnabled(connected);
 	ui_->pushRun->setEnabled(connected);
+	if (auto *btnZero = ui_->groupBox_5->findChild<QPushButton *>(QStringLiteral("btnZero"))) {
+		btnZero->setEnabled(connected);
+	}
+	if (auto *btnSaveRun =
+					ui_->groupBox_5->findChild<QPushButton *>(QStringLiteral("btnSaveRun"))) {
+		btnSaveRun->setEnabled(connected);
+	}
 	ui_->btnJogPlus->setEnabled(connected);
 	ui_->btnJogMinus->setEnabled(connected);
 	ui_->btnJogStop->setEnabled(connected);
@@ -1801,7 +2110,7 @@ void MainWindow::loadSettings() {
 			s.value(QLatin1String(kBodyScopeSettingKey), static_cast<int>(BodyScope::WholeBody))
 					.toInt();
 	if (savedScope >= static_cast<int>(BodyScope::WholeBody) &&
-			savedScope <= static_cast<int>(BodyScope::LowerBody)) {
+			savedScope <= static_cast<int>(BodyScope::Module)) {
 		bodyScope_ = static_cast<BodyScope>(savedScope);
 		{
 			const QSignalBlocker scopeBlocker(ui_->comboBodyScope);
@@ -1820,6 +2129,18 @@ void MainWindow::loadSettings() {
 	for (int i = 0; i < kMotorColSettingCount; ++i) {
 		motorColCbs[i]->setChecked(
 				s.value(QLatin1String(kMotorStColSettingKeys[i]), false).toBool());
+	}
+	s.endGroup();
+
+	s.beginGroup(QLatin1String(kSavePosSettingsGroup));
+	for (int r = 0; r < kMotorSetpointRow; ++r) {
+		QStandardItem *savePosCell = motorStModel_.item(r, kColSetPos);
+		if (!savePosCell) {
+			continue;
+		}
+		const QString key = QStringLiteral("M%1").arg(r);
+		const QString value = s.value(key, QString()).toString().trimmed();
+		savePosCell->setText(value);
 	}
 	s.endGroup();
 	applyMotorStColumnVisibility();
@@ -1869,6 +2190,16 @@ void MainWindow::saveSettings() {
 	};
 	for (int i = 0; i < kMotorColSettingCount; ++i) {
 		s.setValue(QLatin1String(kMotorStColSettingKeys[i]), motorColCbs[i]->isChecked());
+	}
+	s.endGroup();
+
+	s.beginGroup(QLatin1String(kSavePosSettingsGroup));
+	for (int r = 0; r < kMotorSetpointRow; ++r) {
+		QStandardItem *savePosCell = motorStModel_.item(r, kColSetPos);
+		if (!savePosCell) {
+			continue;
+		}
+		s.setValue(QStringLiteral("M%1").arg(r), savePosCell->text().trimmed());
 	}
 	s.endGroup();
 }
@@ -1935,49 +2266,66 @@ void MainWindow::pollDataMotorSt() {
 			continue;
 		}
 		const std::size_t slot = static_cast<std::size_t>(localSlot);
-		if (!motorStWireFits(stByteLen, slot)) {
+		const bool miniScope = bodyScopeUsesCompactMotorSt(bodyScope_);
+		if (miniScope) {
+			const std::size_t byteOffset = slot * sizeof(UpperBodyMiniMotorStWire);
+			if (byteOffset + sizeof(UpperBodyMiniMotorStWire) > stByteLen) {
+				clearMotorStPollDataForRow(r);
+				continue;
+			}
+		} else if (!motorStWireFits(stByteLen, slot)) {
 			clearMotorStPollDataForRow(r);
 			continue;
 		}
-		const MotorStWire &m = *motorStWireAt(stRaw.data(), slot);
 		const MotorCmdWire *c =
 				motorCmdWireFits(cmdByteLen, slot, cmdStride)
 						? motorCmdWireAt(cmdRaw.data(), slot, cmdStride)
 						: nullptr;
+		const UpperBodyMiniMotorStWire *mini =
+				miniScope
+						? reinterpret_cast<const UpperBodyMiniMotorStWire *>(
+										stRaw.data() + slot * sizeof(UpperBodyMiniMotorStWire))
+						: nullptr;
+		const MotorStWire *full = miniScope ? nullptr : motorStWireAt(stRaw.data(), slot);
 		QStandardItem *swItem = motorStModel_.item(r, kColSw);
-		swItem->setText(formatMotorStatusWord(m.nStatusWord));
+		swItem->setText(formatMotorStatusWord(miniScope ? mini->nStatusWord : full->nStatusWord));
 		swItem->setToolTip(
-				QStringLiteral("0x%1").arg(m.nStatusWord, 4, 16, QChar('0')));
+				QStringLiteral("0x%1").arg(miniScope ? mini->nStatusWord : full->nStatusWord, 4, 16, QChar('0')));
 		QStandardItem *errItem = motorStModel_.item(r, kColErr);
-		errItem->setText(formatMotorErrorCode(m.nErrorCode));
+		errItem->setText(formatMotorErrorCode(miniScope ? mini->nErrorCode : full->nErrorCode));
 		errItem->setToolTip(
-				QStringLiteral("code=0x%1").arg(m.nErrorCode, 4, 16, QChar('0')));
-		motorStModel_.item(r, kColMode)->setText(QString::number(m.nModeOfOperationDisplay));
+				QStringLiteral("code=0x%1").arg(miniScope ? mini->nErrorCode : full->nErrorCode, 4, 16, QChar('0')));
+		motorStModel_.item(r, kColMode)->setText(
+				QString::number(miniScope ? mini->nModeOfOperationDisplay : full->nModeOfOperationDisplay));
 		QStandardItem *wcItem = motorStModel_.item(r, kColWc);
-		wcItem->setText(formatWcState(m.nWcState));
-		if (m.nWcState == 0) {
+		const std::uint8_t wc = miniScope ? static_cast<std::uint8_t>(0) : full->nWcState;
+		wcItem->setText(formatWcState(wc));
+		if (wc == 0) {
 			wcItem->setToolTip(QStringLiteral("raw=0 — Connected"));
-		} else if (m.nWcState == 1) {
+		} else if (wc == 1) {
 			wcItem->setToolTip(QStringLiteral("raw=1 — Disconnected"));
 		} else {
 			wcItem->setToolTip(
-					QStringLiteral("raw=%1").arg(static_cast<unsigned>(m.nWcState)));
+					QStringLiteral("raw=%1").arg(static_cast<unsigned>(wc)));
 		}
-		motorStModel_.item(r, kColPos)->setText(QString::number(m.nActualPosition));
-		motorStModel_.item(r, kColVel)->setText(QString::number(m.nActualVelocity));
-		motorStModel_.item(r, kColTrq)->setText(QString::number(m.nActualTorque));
+		const std::int32_t actualPosition = miniScope ? mini->nActualPosition : full->nActualPosition;
+		motorStModel_.item(r, kColPos)->setText(QString::number(actualPosition));
+		motorStModel_.item(r, kColVel)->setText(
+				QString::number(miniScope ? mini->nActualVelocity : full->nActualVelocity));
+		motorStModel_.item(r, kColTrq)->setText(
+				QString::number(miniScope ? mini->nActualTorque : full->nActualTorque));
 		motorStModel_.item(r, kColDeg)->setText(
-				formatDegForModuleFromActualPosition(r, m.nActualPosition));
+				formatDegForModuleFromActualPosition(r, actualPosition));
 		if (c) {
 			motorStModel_.item(r, kColTgtPos)->setText(QString::number(c->nTargetPosition));
 			const qint64 following =
-					static_cast<qint64>(c->nTargetPosition) - static_cast<qint64>(m.nActualPosition);
+					static_cast<qint64>(c->nTargetPosition) - static_cast<qint64>(actualPosition);
 			motorStModel_.item(r, kColFolErr)->setText(QString::number(following));
 		} else {
 			motorStModel_.item(r, kColTgtPos)->setText(QStringLiteral("—"));
 			motorStModel_.item(r, kColFolErr)->setText(QStringLiteral("—"));
 		}
-		lastMotorWc_[static_cast<std::size_t>(i)] = m.nWcState;
+		lastMotorWc_[static_cast<std::size_t>(i)] = wc;
 	}
 	if (topologyWidget_) {
 		topologyWidget_->setStatusForAll(TopologyWidget::StatusIcon::Disconnected);
@@ -1987,6 +2335,23 @@ void MainWindow::pollDataMotorSt() {
 				continue;
 			}
 			const std::size_t slot = static_cast<std::size_t>(localSlot);
+			const bool miniScope = bodyScopeUsesCompactMotorSt(bodyScope_);
+			if (miniScope) {
+				const std::size_t byteOffset = slot * sizeof(UpperBodyMiniMotorStWire);
+				if (byteOffset + sizeof(UpperBodyMiniMotorStWire) > stByteLen) {
+					continue;
+				}
+				const auto &m =
+						*reinterpret_cast<const UpperBodyMiniMotorStWire *>(stRaw.data() + byteOffset);
+				TopologyWidget::StatusIcon st;
+				if (m.nErrorCode != 0) {
+					st = TopologyWidget::StatusIcon::Fault;
+				} else {
+					st = TopologyWidget::StatusIcon::Normal;
+				}
+				topologyWidget_->setModuleStatus(i, st);
+				continue;
+			}
 			if (!motorStWireFits(stByteLen, slot)) {
 				continue;
 			}
@@ -2132,7 +2497,8 @@ void MainWindow::rebuildPathIndexCombo() {
 	const BodyScopeRange range = currentBodyScopeRange();
 	const int previousReal = ui_->cbIndex->currentData(Qt::UserRole).toInt();
 	ui_->cbIndex->clear();
-	if (bodyScope_ == BodyScope::LowerBody) {
+	if (bodyScope_ == BodyScope::LowerBody || bodyScope_ == BodyScope::UpperBodyMini ||
+			bodyScope_ == BodyScope::Module) {
 		for (int local = 0; local < range.moduleCount; ++local) {
 			const int realModule = realModuleForLocalSlot(local, bodyScope_);
 			ui_->cbIndex->addItem(QString::number(local), realModule);
@@ -2154,6 +2520,12 @@ void MainWindow::rebuildPathIndexCombo() {
 }
 
 void MainWindow::setupBodyScopeUi() {
+	ui_->comboBodyScope->clear();
+	ui_->comboBodyScope->addItem(QStringLiteral("Whole Body"));
+	ui_->comboBodyScope->addItem(QStringLiteral("Upper Body"));
+	ui_->comboBodyScope->addItem(QStringLiteral("Upper Body Mini"));
+	ui_->comboBodyScope->addItem(QStringLiteral("Lower Body"));
+	ui_->comboBodyScope->addItem(QStringLiteral("Module"));
 	ui_->comboBodyScope->setCurrentIndex(static_cast<int>(BodyScope::WholeBody));
 	connect(ui_->comboBodyScope, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
 					&MainWindow::onBodyScopeChanged);
@@ -2161,10 +2533,17 @@ void MainWindow::setupBodyScopeUi() {
 
 void MainWindow::onBodyScopeChanged(int index) {
 	if (index < static_cast<int>(BodyScope::WholeBody) ||
-			index > static_cast<int>(BodyScope::LowerBody)) {
+			index > static_cast<int>(BodyScope::Module)) {
 		return;
 	}
 	bodyScope_ = static_cast<BodyScope>(index);
+	if (loggingActive_ && !bodyScopeSupportsLogging(bodyScope_)) {
+		stopLogging(true);
+		statusBar()->showMessage(
+				QStringLiteral("Logging stopped: %1 does not support logging.")
+						.arg(QString::fromUtf8(bodyScopeLabel(bodyScope_))),
+				4000);
+	}
 	applyBodyScope();
 	applyEndpointForBodyScope(bodyScope_);
 	saveConnectionSettings();
@@ -2175,9 +2554,11 @@ void MainWindow::applyEndpointForBodyScope(BodyScope scope) {
 	switch (scope) {
 		case BodyScope::WholeBody:
 		case BodyScope::UpperBody:
+		case BodyScope::UpperBodyMini:
 			endpoint = &kUpperBodyEndpoint;
 			break;
 		case BodyScope::LowerBody:
+		case BodyScope::Module:
 			endpoint = &kLowerBodyEndpoint;
 			break;
 	}
@@ -2188,9 +2569,15 @@ void MainWindow::applyEndpointForBodyScope(BodyScope scope) {
 	if (scope == BodyScope::UpperBody) {
 		const QSignalBlocker portBlocker(ui_->editPort);
 		ui_->editPort->setText(QString::number(kUpperBodyAdsProfile.defaultPort));
+	} else if (scope == BodyScope::UpperBodyMini) {
+		const QSignalBlocker portBlocker(ui_->editPort);
+		ui_->editPort->setText(QString::number(kUpperBodyMiniAdsProfile.defaultPort));
 	} else if (scope == BodyScope::LowerBody) {
 		const QSignalBlocker portBlocker(ui_->editPort);
 		ui_->editPort->setText(QString::number(kLowerBodyAdsProfile.defaultPort));
+	} else if (scope == BodyScope::Module) {
+		const QSignalBlocker portBlocker(ui_->editPort);
+		ui_->editPort->setText(QString::number(kModuleAdsProfile.defaultPort));
 	}
 }
 
@@ -2198,8 +2585,12 @@ const AdsBodyScopeProfile &MainWindow::currentAdsProfile() const {
 	switch (bodyScope_) {
 		case BodyScope::UpperBody:
 			return kUpperBodyAdsProfile;
+		case BodyScope::UpperBodyMini:
+			return kUpperBodyMiniAdsProfile;
 		case BodyScope::LowerBody:
 			return kLowerBodyAdsProfile;
+		case BodyScope::Module:
+			return kModuleAdsProfile;
 		case BodyScope::WholeBody:
 		default:
 			return kWholeBodyAdsProfile;
@@ -2295,9 +2686,12 @@ void MainWindow::onConnectClicked() {
 		device_ = std::move(dev);
 		setConnectedUi(true);
 		const QString summary = QStringLiteral("Connected — %1").arg(detail);
+		const AdsBodyScopeProfile &profile = currentAdsProfile();
+		const int scopedReadBytes = static_cast<int>(profile.dataMotorSt.byteLength +
+																								 profile.dataMotorCmd.byteLength);
 		statusBar()->showMessage(
 				summary + QStringLiteral(" · polling DataMotorSt+Cmd (%1 B) every %2 ms")
-											.arg(static_cast<int>(kServerToClientStCmdReadLen))
+											.arg(scopedReadBytes)
 											.arg(pollTimer_.interval()),
 				6000);
 		lastMotorPollError_ = 0;
